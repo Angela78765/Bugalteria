@@ -1,120 +1,91 @@
 import os
-import time
 import json
-from html import escape
+from flask import Flask, request
 import requests
-from flask import Flask
+from html import escape
 
 TOKEN = os.getenv("API_TOKEN")
-if not TOKEN:
-    raise RuntimeError("API_TOKEN environment variable is not set")
-
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
-API_URL = f"https://api.telegram.org/bot{TOKEN}"
+if not TOKEN or not ADMIN_ID:
+    raise RuntimeError("API_TOKEN и ADMIN_ID должны быть заданы в переменных окружения!")
 
+# Меню-клавиатура
 MAIN_MARKUP = {
     "keyboard": [
-        [{"text": "Питання"}],
-        [{"text": "Отримати реквізити"}]
+        [{"text": "Меню"}],
+        [{"text": "Связь с админом"}, {"text": "Реквізити оплати"}]
     ],
     "resize_keyboard": True,
     "one_time_keyboard": False
 }
 
 REKV_TEXT = (
-    "<b>Реквізити для переказу</b>\n"
+    "<b>Реквізити для оплати:</b>\n"
     "ПриватБанк: 1234 5678 0000 1111\n"
     "МоноБанк: 4444 5678 1234 5678\n"
-    "IBAN: UA12 1234 5678 0000 1111 1234 5678\n"
+    "IBAN: UA12 1234 5678 0000 1111 1234 5678"
 )
 
-waiting_ids = set()
-offset = 0  # для getUpdates
+waiting_feedback = set()
 
 app = Flask(__name__)
 
 def send_message(chat_id, text, reply_markup=None, parse_mode=None):
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     data = {"chat_id": chat_id, "text": text}
     if reply_markup:
-        data["reply_markup"] = json.dumps(reply_markup, ensure_ascii=False)
+        data["reply_markup"] = json.dumps(reply_markup)
     if parse_mode:
         data["parse_mode"] = parse_mode
-    try:
-        requests.post(f"{API_URL}/sendMessage", data=data, timeout=10)
-    except Exception as e:
-        print("Error sending message:", e)
+    requests.post(url, data=data, timeout=8)
 
-def build_welcome(user):
-    name = ((user.get("first_name") or "") + " " + (user.get("last_name") or "")).strip() or "Друже"
-    return f"<b>Ласкаво просимо, {escape(name)}!</b>\n\nОберіть дію за допомогою кнопок внизу."
-
-def get_updates():
-    global offset
-    try:
-        r = requests.get(f"{API_URL}/getUpdates", params={"timeout": 30, "offset": offset}, timeout=35)
-        data = r.json()
-        if not data.get("ok"):
-            return []
-        updates = data["result"]
-        if updates:
-            offset = updates[-1]["update_id"] + 1
-        return updates
-    except Exception as e:
-        print("Error getting updates:", e)
-        time.sleep(2)
-        return []
-
-def handle_message(msg):
-    chat_id = msg["chat"]["id"]
+@app.route(f"/webhook/{TOKEN}", methods=["POST"])
+def webhook():
+    update = request.get_json(force=True)
+    msg = update.get("message", {})
+    chat_id = msg.get("chat", {}).get("id")
+    text = msg.get("text", "") or ""
     user = msg.get("from", {})
-    text = (msg.get("text") or "").strip()
+    user_name = (user.get("first_name", "") + " " + user.get("last_name", "")).strip() or "Без имени"
 
+    # /start (любой вариант)
     if text.startswith("/start"):
-        send_message(chat_id, build_welcome(user), MAIN_MARKUP, "HTML")
-        return
+        send_message(chat_id, f"👋 Вітаємо, <b>{escape(user_name)}</b>! Виберіть дію з меню нижче.", reply_markup=MAIN_MARKUP, parse_mode="HTML")
+        return "ok", 200
 
-    if text == "Питання":
-        waiting_ids.add(chat_id)
-        send_message(chat_id, "Напишіть своє питання текстом.", MAIN_MARKUP)
-        return
+    # Reply-кнопки
+    if text == "Меню":
+        send_message(chat_id, "✨ Доступні дії:\n- Меню\n- Связь с админом\n- Реквізити оплати", reply_markup=MAIN_MARKUP)
+        return "ok", 200
+    if text == "Реквізити оплати":
+        send_message(chat_id, REKV_TEXT, reply_markup=MAIN_MARKUP, parse_mode="HTML")
+        return "ok", 200
+    if text == "Связь с админом":
+        waiting_feedback.add(chat_id)
+        send_message(chat_id, "✉️ Введіть повідомлення для адміністратора:", reply_markup=MAIN_MARKUP)
+        return "ok", 200
 
-    if text == "Отримати реквізити":
-        send_message(chat_id, REKV_TEXT, MAIN_MARKUP, "HTML")
-        return
-
-    if chat_id in waiting_ids:
-        waiting_ids.discard(chat_id)
-        name = ((user.get("first_name") or "") + " " + (user.get("last_name") or "")).strip() or "Користувач"
-        admin_text = (
-            "<b>Нове питання</b>\n"
-            f"Від: {escape(name)}\n"
-            f"ID: {user.get('id')}\n\n"
-            f"<pre>{escape(text)}</pre>"
+    # Принятие сообщения для админа
+    if chat_id in waiting_feedback:
+        sent = (
+            f"<b>Повідомлення адміну!</b>\n"
+            f"Від: <b>{escape(user_name)}</b> (id: {user.get('id')})\n"
+            f"\n{escape(text)}"
         )
-        if ADMIN_ID:
-            send_message(ADMIN_ID, admin_text, parse_mode="HTML")
-        send_message(chat_id, "Дякуємо! Питання передано адміністратору.", MAIN_MARKUP)
-        return
+        send_message(ADMIN_ID, sent, parse_mode="HTML")
+        send_message(chat_id, "✅ Повідомлення відправлено адміністратору.", reply_markup=MAIN_MARKUP)
+        waiting_feedback.discard(chat_id)
+        return "ok", 200
 
-    send_message(chat_id, "Оберіть дію з меню ⬇", MAIN_MARKUP)
+    # Всё остальное — просто просим выбрать действие
+    send_message(chat_id, "Будь ласка, оберіть дію з меню 👇", reply_markup=MAIN_MARKUP)
+    return "ok", 200
 
-# Flask для Render (чтобы Render видел open port)
 @app.route("/", methods=["GET"])
 def index():
-    return "Bot is running", 200
+    return "Bot is running!", 200
 
 if __name__ == "__main__":
-    # Получаем порт Render
-    port = int(os.getenv("PORT", "10000"))
-    
-    # Запуск Flask в отдельном потоке, чтобы polling не блокировал
-    from threading import Thread
-    Thread(target=lambda: app.run(host="0.0.0.0", port=port)).start()
-    
-    print("Bot started via polling")
-    while True:
-        updates = get_updates()
-        for update in updates:
-            if "message" in update:
-                handle_message(update["message"])
-        time.sleep(0.5)
+    port = int(os.getenv("PORT", "5000"))
+    print(f"Bot started at port {port}")
+    app.run(host="0.0.0.0", port=port)
