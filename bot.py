@@ -75,7 +75,7 @@ def consult_duration_inline():
 WELCOME_SERVICES_TEXT = (
     "Вітаю\n"
     "Мене звати,  ——— !\n"
-    "Я бухгалтер для ФОП — допомагаю підприєм��ям спокійно вести справи, не хвилюючись за податки, звітність і всі дрібниці, про які зазвичай болить голова\n\n"
+    "Я бухгалтер для ФОП — допомагаю підприємцям спокійно вести справи, не хвилюючись за податки, звітність і всі дрібниці, про які зазвичай болить голова\n\n"
     "У цьому боті ви можете:\n"
     "• обрати потрібну послугу та одразу побачити вартість;\n"
     "• записатись на консультацію чи супровід;\n"
@@ -149,16 +149,18 @@ def webhook():
             send_message(chat_id, CONSULT_CONTACTS_TEXT, reply_markup=return_to_menu_markup())
             return "ok", 200
 
+        # Исправление! Кнопка Повернутися в меню (inline)
         if data == "consult_back":
-            send_message(chat_id, WELCOME_SERVICES_TEXT, reply_markup=welcome_services_inline(), parse_mode="HTML")
             consult_request.pop(from_id, None)
+            active_chats.pop(from_id, None)  # Сбросить статусы (на всякий)
+            send_message(chat_id, "👋 Добро пожаловать! Выберите действие:", reply_markup=main_menu_markup())
             return "ok", 200
 
         if data in ("support", "regclose", "reports", "prro", "decret"):
             send_message(chat_id, "Оберіть далі, або поверніться до меню.", reply_markup=return_to_menu_markup())
             return "ok", 200
 
-        # Ответ и завершение админом
+        # Ответ и завершение ад��ином
         if data.startswith("reply_") and int(from_id) == ADMIN_ID:
             user_id = int(data.split("_")[1])
             active_chats[user_id] = "active"
@@ -181,13 +183,15 @@ def webhook():
     user_name = (user_data.get("first_name", "") + " " + user_data.get("last_name", "")).strip() or "Пользователь"
 
     # --- Главное меню / старт ---
-    if text.startswith("/start"):
+    # Кнопка-реплай Повернутися в меню (или команды /start)
+    if text.startswith("/start") or text == "Повернутися в меню":
+        # Сбросить все статусы для пользователя
+        consult_request.pop(user_id, None)
+        active_chats.pop(user_id, None)
         send_message(cid, "👋 Добро пожаловать! Выберите действие:", reply_markup=main_menu_markup())
         return "ok", 200
+
     if text == "Меню":
-        send_message(cid, WELCOME_SERVICES_TEXT, reply_markup=welcome_services_inline(), parse_mode="HTML")
-        return "ok", 200
-    if text == "Поверн��тися в меню":
         send_message(cid, WELCOME_SERVICES_TEXT, reply_markup=welcome_services_inline(), parse_mode="HTML")
         return "ok", 200
     if text == "Реквізити оплати" and cid not in active_chats:
@@ -242,7 +246,7 @@ def webhook():
 
     # --- Если пользователь в чате, доступны только переписка и "Завершить чат" ---
     if cid in active_chats:
-        send_message(cid, "В активном чате доступны только перепис��а и кнопка 'Завершить чат'.", reply_markup=user_finish_markup())
+        send_message(cid, "В активном чате доступны только переписка и кнопка 'Завершить чат'.", reply_markup=user_finish_markup())
         return "ok", 200
 
     # --- Обработка контактов консультації (текст или медиа), категорию и время в сообщение админу ---
