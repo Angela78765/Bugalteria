@@ -5,71 +5,44 @@ from flask import Flask, request
 from sqlalchemy import create_engine, text
 from html import escape
 
-# -------- Конфиги и переменные окружения -----------
-TOKEN = os.getenv("API_TOKEN")
-if not TOKEN:
-    raise RuntimeError("API_TOKEN environment variable not set!")
+# ----------- Ваши значения -----------
+TOKEN = '8465183620:AAFJn7oANCnjTz_uoed0uRtOkITR1Tj7PQI'  # <-- вставлен ваш токен
+ADMIN_ID = 887078537                                      # <-- вставлен ваш ID
 
-try:
-    ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))  # если ADMIN_ID нет - админу не будет пересылки
-except Exception:
-    ADMIN_ID = 0
+db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "events.db")
+db_url = f"sqlite:///{db_path}"
 
-DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-if not DATABASE_URL:
-    db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "events.db")
-    db_url = f"sqlite:///{db_path}"
-else:
-    db_url = DATABASE_URL
+waiting_ids = set()
 
-# --------- Поддержка базы SQLite -----------
+# -------- Создание базы ------------
 _engine = None
 def get_engine():
     global _engine
     if _engine is None:
-        if db_url.startswith("sqlite:///"):
-            _engine = create_engine(db_url, connect_args={"check_same_thread": False}, future=True)
-        else:
-            _engine = create_engine(db_url, future=True)
+        _engine = create_engine(db_url, connect_args={"check_same_thread": False}, future=True)
     return _engine
 
 def init_db():
     engine = get_engine()
-    create_sql = (
-        """CREATE TABLE IF NOT EXISTS events (
+    create_sql = """CREATE TABLE IF NOT EXISTS events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         category TEXT NOT NULL,
         dt TEXT NOT NULL
-        );""" if engine.dialect.name == "sqlite"
-        else
-        """CREATE TABLE IF NOT EXISTS events (
-        id SERIAL PRIMARY KEY,
-        category TEXT NOT NULL,
-        dt TIMESTAMP NOT NULL
-        );"""
-    )
+    );"""
     with engine.begin() as conn:
         conn.execute(text(create_sql))
 
 def save_event(category):
     engine = get_engine()
-    now = datetime.datetime.utcnow()
-    if engine.dialect.name == "sqlite":
-        dt_val = now.isoformat()
-        insert_sql = "INSERT INTO events (category, dt) VALUES (:cat, :dt)"
-        with engine.begin() as conn:
-            conn.execute(text(insert_sql), {"cat": category, "dt": dt_val})
-    else:
-        insert_sql = "INSERT INTO events (category, dt) VALUES (:cat, :dt)"
-        with engine.begin() as conn:
-            conn.execute(text(insert_sql), {"cat": category, "dt": now})
+    now = datetime.datetime.utcnow().isoformat()
+    insert_sql = "INSERT INTO events (category, dt) VALUES (:cat, :dt)"
+    with engine.begin() as conn:
+        conn.execute(text(insert_sql), {"cat": category, "dt": now})
 
 init_db()
 
-# ------------- Flask App + Логика --------------
+# ----------- Flask и бизнес-логика -----------
 app = Flask(__name__)
-
-waiting_ids = set()  # тут запомним id чатов, которые ждём вопрос
 
 MAIN_MARKUP = {
     "keyboard": [
