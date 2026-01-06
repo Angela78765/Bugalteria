@@ -75,7 +75,7 @@ def consult_duration_inline():
 WELCOME_SERVICES_TEXT = (
     "Вітаю\n"
     "Мене звати,  ——— !\n"
-    "Я бухгалтер для ФОП — допомагаю підприємцям спокійно вести справи, не хвилюючись за податки, звітність і всі дрібниці, про які зазвичай болить голова\n\n"
+    "Я бухгалтер для ФОП — допомагаю підприєм��ям спокійно вести справи, не хвилюючись за податки, звітність і всі дрібниці, про які зазвичай болить голова\n\n"
     "У цьому боті ви можете:\n"
     "• обрати потрібну послугу та одразу побачити вартість;\n"
     "• записатись на консультацію чи супровід;\n"
@@ -101,7 +101,7 @@ CONSULT_CONTACTS_TEXT = (
     "•Нік Інстаграм чи Телеграм"
 )
 
-# ======= Хелперы для отправки со��бщений и медиа =======
+# ======= Хелперы для отправки сообщений и медиа =======
 def send_message(chat_id, text, reply_markup=None, parse_mode=None):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     data = {"chat_id": chat_id, "text": text}
@@ -138,26 +138,22 @@ def webhook():
         from_id = cb["from"]["id"]
 
         # >>>>>>> БЛОК ДЛЯ КОНСУЛЬТАЦИИ <<<<<<<<
-        # Шаг 1: Клик на «консультації»
         if data == "consult":
             consult_request[from_id] = {"stage": "choose_duration"}
             send_message(chat_id, CONSULT_INTRO_TEXT, reply_markup=consult_duration_inline())
             return "ok", 200
 
-        # Шаг 2: Выбор длительности
         if data in ("consult_30", "consult_45", "consult_60"):
             duration = data.split("_")[1]
             consult_request[from_id] = {"stage": "await_contact", "duration": duration}
             send_message(chat_id, CONSULT_CONTACTS_TEXT, reply_markup=return_to_menu_markup())
             return "ok", 200
 
-        # Шаг 3: Возврат в меню из консультации
         if data == "consult_back":
             send_message(chat_id, WELCOME_SERVICES_TEXT, reply_markup=welcome_services_inline(), parse_mode="HTML")
             consult_request.pop(from_id, None)
             return "ok", 200
 
-        # Остальные сервисные инлайн-кнопки
         if data in ("support", "regclose", "reports", "prro", "decret"):
             send_message(chat_id, "Оберіть далі, або поверніться до меню.", reply_markup=return_to_menu_markup())
             return "ok", 200
@@ -191,7 +187,7 @@ def webhook():
     if text == "Меню":
         send_message(cid, WELCOME_SERVICES_TEXT, reply_markup=welcome_services_inline(), parse_mode="HTML")
         return "ok", 200
-    if text == "Повернутися в меню":
+    if text == "Поверн��тися в меню":
         send_message(cid, WELCOME_SERVICES_TEXT, reply_markup=welcome_services_inline(), parse_mode="HTML")
         return "ok", 200
     if text == "Реквізити оплати" and cid not in active_chats:
@@ -246,21 +242,26 @@ def webhook():
 
     # --- Если пользователь в чате, доступны только переписка и "Завершить чат" ---
     if cid in active_chats:
-        send_message(cid, "В активном чате доступны только переписка и кнопка 'Завершить чат'.", reply_markup=user_finish_markup())
+        send_message(cid, "В активном чате доступны только перепис��а и кнопка 'Завершить чат'.", reply_markup=user_finish_markup())
         return "ok", 200
 
-    # --- Обработка отправки контактов по консультации ---
+    # --- Обработка контактов консультації (текст или медиа), категорию и время в сообщение админу ---
     if user_id in consult_request and consult_request[user_id].get("stage") == "await_contact":
         duration = consult_request[user_id].get("duration")
-        user_contacts = text.strip()
         note = (
             f"<b>Заявка на консультацію</b>\n"
             f"Тривалість: {duration} хв\n"
             f"Від: {escape(user_name)}\n"
             f"ID: <pre>{user_id}</pre>\n"
-            f"Контакти: <pre>{escape(user_contacts)}</pre>"
         )
-        send_message(ADMIN_ID, note, parse_mode="HTML", reply_markup=admin_reply_markup(user_id))
+        # Пересылка медиа админу
+        if any(k in msg for k in ("photo", "document", "video", "audio", "voice")):
+            send_message(ADMIN_ID, note, parse_mode="HTML", reply_markup=admin_reply_markup(user_id))
+            send_media(ADMIN_ID, msg)
+        # Пересылка контактов
+        elif text:
+            note += f"Контакти: <pre>{escape(text.strip())}</pre>"
+            send_message(ADMIN_ID, note, parse_mode="HTML", reply_markup=admin_reply_markup(user_id))
         send_message(user_id, "Дякую! Ваші дані отримано, з вами зв'яжеться адміністратор.", reply_markup=main_menu_markup())
         consult_request.pop(user_id, None)
         return "ok", 200
