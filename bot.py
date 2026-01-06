@@ -3,13 +3,14 @@ import time
 import json
 from html import escape
 import requests
+from flask import Flask
 
 TOKEN = os.getenv("API_TOKEN")
 if not TOKEN:
     raise RuntimeError("API_TOKEN environment variable is not set")
 
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
-API_URL = f"https://api.telegram.org/bot8465183620:AAFo-O8lqEG91o0xF-emAj5iplvvWqO1knA"
+API_URL = f"https://api.telegram.org/bot{TOKEN}"
 
 MAIN_MARKUP = {
     "keyboard": [
@@ -28,13 +29,12 @@ REKV_TEXT = (
 )
 
 waiting_ids = set()
-offset = 0  # Для getUpdates
+offset = 0  # для getUpdates
+
+app = Flask(__name__)
 
 def send_message(chat_id, text, reply_markup=None, parse_mode=None):
-    data = {
-        "chat_id": chat_id,
-        "text": text
-    }
+    data = {"chat_id": chat_id, "text": text}
     if reply_markup:
         data["reply_markup"] = json.dumps(reply_markup, ensure_ascii=False)
     if parse_mode:
@@ -92,17 +92,29 @@ def handle_message(msg):
             f"<pre>{escape(text)}</pre>"
         )
         if ADMIN_ID:
-            send_message(ADMIN_ID, admin_text, "HTML")
+            send_message(ADMIN_ID, admin_text, parse_mode="HTML")
         send_message(chat_id, "Дякуємо! Питання передано адміністратору.", MAIN_MARKUP)
         return
 
     send_message(chat_id, "Оберіть дію з меню ⬇", MAIN_MARKUP)
 
-# Основной цикл polling
-print("Bot started via polling")
-while True:
-    updates = get_updates()
-    for update in updates:
-        if "message" in update:
-            handle_message(update["message"])
-    time.sleep(0.5)  # чуть снижаем нагрузку на сервер
+# Flask для Render (чтобы Render видел open port)
+@app.route("/", methods=["GET"])
+def index():
+    return "Bot is running", 200
+
+if __name__ == "__main__":
+    # Получаем порт Render
+    port = int(os.getenv("PORT", "10000"))
+    
+    # Запуск Flask в отдельном потоке, чтобы polling не блокировал
+    from threading import Thread
+    Thread(target=lambda: app.run(host="0.0.0.0", port=port)).start()
+    
+    print("Bot started via polling")
+    while True:
+        updates = get_updates()
+        for update in updates:
+            if "message" in update:
+                handle_message(update["message"])
+        time.sleep(0.5)
