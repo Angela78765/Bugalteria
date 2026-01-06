@@ -1,1 +1,1 @@
-worker: python bot.py
+echo "worker: python Boot.py"
