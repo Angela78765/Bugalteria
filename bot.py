@@ -1,26 +1,10 @@
 import os
 import json
 import time
-import traceback
 from html import escape
 from flask import Flask, request
 import requests
 
-# Простое логирование в файл
-def MainProtokol(s, ts='Log'):
-    try:
-        with open('log.txt', 'a', encoding='utf-8') as f:
-            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')};{ts};{s}\n")
-    except Exception:
-        pass
-
-def cool_error_handler(exc, context=""):
-    tb = ''.join(traceback.format_exception(type(exc), exc, exc.__traceback__))
-    MainProtokol(f"{context} | {repr(exc)}\n{tb}", ts='ERROR')
-    print(f"[ERROR] {context}: {exc}")
-    # не шлём телеграм-нотификации в этой упрощённой версии
-
-# Конфигурация (через окружение)
 TOKEN = os.getenv("API_TOKEN")
 if not TOKEN:
     raise RuntimeError("API_TOKEN environment variable is not set")
@@ -56,16 +40,16 @@ def send_message(chat_id, text, reply_markup=None, parse_mode=None, timeout=8):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     data = {"chat_id": chat_id, "text": text}
     if reply_markup:
-        data["reply_markup"] = json.dumps(reply_markup, ensure_ascii=False)
+        data["reply_markup"] = json.dumps(reply_markup)
     if parse_mode:
         data["parse_mode"] = parse_mode
     try:
         r = requests.post(url, data=data, timeout=timeout)
         if not r.ok:
-            MainProtokol(f"send_message failed {r.status_code}: {r.text}", ts='WARN')
+            print(f"send_message failed {r.status_code}: {r.text}")
         return r
     except Exception as e:
-        cool_error_handler(e, "send_message")
+        print(f"Error in send_message: {e}")
         return None
 
 def build_welcome_message(user: dict) -> str:
@@ -81,21 +65,25 @@ def build_welcome_message(user: dict) -> str:
 def webhook():
     try:
         data_raw = request.get_data(as_text=True)
-        MainProtokol(f"UPDATE: {data_raw}", ts='UPDATE')
         update = json.loads(data_raw)
 
-        # only handle message updates in this simplified version
         if "message" in update:
             msg = update["message"]
             chat = msg.get("chat", {}) or {}
             frm = msg.get("from", {}) or {}
             chat_id = chat.get("id")
             from_id = frm.get("id")
-            text = msg.get("text", "") or ""
+            text = msg.get("text", "")
 
-            # /start or start via text
-            if text.strip() == "/start":
-                welcome = build_welcome_message(frm)
+            # Исправление: обработка вариантов команды /start
+            if text.startswith("/start"):
+                # Учитываем варианты: '/start', '/start@BotName', '/start аргументы'
+                if " " in text:  # Если есть аргументы: /start аргументы
+                    arg = text.split(" ", 1)[1]
+                    welcome = f"<b>Отримано аргумент:</b> <pre>{escape(arg)}</pre>\n\n"
+                else:
+                    welcome = ""
+                welcome += build_welcome_message(frm)
                 send_message(chat_id, welcome, reply_markup=MAIN_MARKUP, parse_mode="HTML")
                 return "ok", 200
 
@@ -130,7 +118,7 @@ def webhook():
             send_message(chat_id, "Оберіть дію з меню ⬇", reply_markup=MAIN_MARKUP)
         return "ok", 200
     except Exception as e:
-        cool_error_handler(e, "webhook")
+        print(f"Error in webhook: {e}")
         return "ok", 200
 
 @app.route("/", methods=["GET"])
