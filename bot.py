@@ -5,26 +5,24 @@ from flask import Flask, request
 from sqlalchemy import create_engine, text
 from html import escape
 
-# Проверка переменных среды
+# -------- Конфиги и переменные окружения -----------
 TOKEN = os.getenv("API_TOKEN")
 if not TOKEN:
-    raise RuntimeError("Переменная API_TOKEN не установлена!")
+    raise RuntimeError("API_TOKEN environment variable not set!")
 
 try:
-    ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
+    ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))  # если ADMIN_ID нет - админу не будет пересылки
 except Exception:
     ADMIN_ID = 0
 
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 if not DATABASE_URL:
-    loc_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "events.db")
-    db_url = f"sqlite:///{loc_path}"
+    db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "events.db")
+    db_url = f"sqlite:///{db_path}"
 else:
     db_url = DATABASE_URL
 
-waiting_ids = set()
-
-# ========== База данных ==========
+# --------- Поддержка базы SQLite -----------
 _engine = None
 def get_engine():
     global _engine
@@ -38,21 +36,17 @@ def get_engine():
 def init_db():
     engine = get_engine()
     create_sql = (
-        """
-        CREATE TABLE IF NOT EXISTS events (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            category TEXT NOT NULL,
-            dt TEXT NOT NULL
-        );
-        """
-        if engine.dialect.name == "sqlite"
-        else """
-        CREATE TABLE IF NOT EXISTS events (
-            id SERIAL PRIMARY KEY,
-            category TEXT NOT NULL,
-            dt TIMESTAMP NOT NULL
-        );
-        """
+        """CREATE TABLE IF NOT EXISTS events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        category TEXT NOT NULL,
+        dt TEXT NOT NULL
+        );""" if engine.dialect.name == "sqlite"
+        else
+        """CREATE TABLE IF NOT EXISTS events (
+        id SERIAL PRIMARY KEY,
+        category TEXT NOT NULL,
+        dt TIMESTAMP NOT NULL
+        );"""
     )
     with engine.begin() as conn:
         conn.execute(text(create_sql))
@@ -72,91 +66,92 @@ def save_event(category):
 
 init_db()
 
-# ========== Flask-приложение ==========
+# ------------- Flask App + Логика --------------
 app = Flask(__name__)
+
+waiting_ids = set()  # тут запомним id чатов, которые ждём вопрос
 
 MAIN_MARKUP = {
     "keyboard": [
         [{"text": "Питання"}],
         [{"text": "Отримати реквізити"}]
     ],
-    "resize_keyboard": True,
+    "resize_keyboard": True
 }
 
-REKV_TEXT = "<b>Реквізити для переказу</b>\nПриватБанк: 1234 5678 0000 1111\nМоноБанк: 4444 5678 1234 5678\nIBAN: UA12 1234 5678 0000 1111 1234 5678\n"
+REKV_TEXT = (
+    "<b>Реквізити для переказу</b>\n"
+    "ПриватБанк: 1234 5678 0000 1111\n"
+    "МоноБанк: 4444 5678 1234 5678\n"
+    "IBAN: UA12 1234 5678 0000 1111 1234 5678\n"
+)
 
 @app.route(f"/webhook/{TOKEN}", methods=['POST'])
 def webhook():
     try:
         data = request.get_data(as_text=True)
-        print(f"Получен запрос: {data}")  # Диагностика!
+        print("Получен апдейт:", data)
         update = json.loads(data)
         if "message" in update:
             message = update["message"]
             chat_id = message["chat"]["id"]
-            text = message.get("text", "")
+            text = message.get("text", "").strip()
             user = message.get("from", {})
-            print(f"От чата {chat_id}: {text}")
+            print(f"---- message from {chat_id}: '{text}'")
+
             if text == "/start":
                 send_message(chat_id, "Ласкаво просимо! Оберіть дію з меню.", reply_markup=MAIN_MARKUP)
-                return "ok", 200
             elif text == "Питання":
                 send_message(chat_id, "Задайте своє питання текстом. Ми передамо його адміністратору.", reply_markup=MAIN_MARKUP)
                 waiting_ids.add(chat_id)
-                return "ok", 200
             elif text == "Отримати реквізити":
                 send_message(chat_id, REKV_TEXT, parse_mode="HTML", reply_markup=MAIN_MARKUP)
-                return "ok", 200
             elif chat_id in waiting_ids and text:
                 save_event("Питання")
                 send_message(chat_id, "Дякуємо! Ваше питання отримано.", reply_markup=MAIN_MARKUP)
                 user_name = (user.get('first_name') or '') + ' ' + (user.get('last_name') or '')
-                admin_msg = "<b>Нове питання!</b>\n" \
-                            f"Від: {escape(user_name.strip()) or 'Користувач'}\n" \
-                            f"ID: {user.get('id')}\n" \
-                            f"Текст: <pre>{escape(text)}</pre>"
+                admin_msg = (
+                    "<b>Нове питання!</b>\n"
+                    f"Від: {escape(user_name.strip()) or 'Користувач'}\n"
+                    f"ID: {user.get('id')}\n"
+                    f"Текст: <pre>{escape(text)}</pre>"
+                )
                 if ADMIN_ID:
                     send_message(ADMIN_ID, admin_msg, parse_mode="HTML")
                 waiting_ids.discard(chat_id)
-                return "ok", 200
             else:
                 send_message(chat_id, "Оберіть дію з меню ⬇", reply_markup=MAIN_MARKUP)
-                return "ok", 200
         else:
-            print("Нет сообщения в update:", update)
+            print("Нет message!", update)
         return "ok", 200
     except Exception as e:
-        print("Ошибка в webhook:", repr(e))
+        print("Ошибка в webhook:", e)
         return "ok", 200
 
-@app.route('/', methods=['GET'])
-def index():
-    return "Bot working", 200
+@app.route("/", methods=['GET'])
+def root():
+    return "Bot is running", 200
 
 def send_message(chat_id, text, reply_markup=None, parse_mode=None):
-    if not TOKEN:
-        print("API_TOKEN not set; cannot send message.")
-        return None
-    url = f'https://api.telegram.org/bot{TOKEN}/sendMessage'
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     payload = {
-        'chat_id': chat_id,
-        'text': text,
+        "chat_id": chat_id,
+        "text": text
     }
     if reply_markup:
-        payload['reply_markup'] = json.dumps(reply_markup)
+        payload["reply_markup"] = json.dumps(reply_markup)
     if parse_mode:
-        payload['parse_mode'] = parse_mode
+        payload["parse_mode"] = parse_mode
     try:
         import requests
-        r = requests.post(url, data=payload, timeout=8)
-        print(f"send_message response {r.status_code}: {r.text}")
-        return r
+        resp = requests.post(url, data=payload, timeout=10)
+        print(f"[send_message] Ответ {resp.status_code}", resp.text)
+        return resp
     except Exception as e:
-        print("Ошибка отправки сообщения:", e)
+        print("[send_message] Ошибка:", e)
         return None
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
-    print(f"Bot starting on port {port} ...")
+    print(f"Стартую на порту {port} ...")
     app.run("0.0.0.0", port=port, debug=True)
-    
