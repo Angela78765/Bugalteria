@@ -1,15 +1,20 @@
+import os
 import telebot
+import telebot.util
 
-# Твой токен
-TOKEN = '8465183620:AAFJn7oANCnjTz_uoed0uRtOkITR1Tj7PQI'
-ADMIN_ID = 887078537
+# Получаем токен и ADMIN_ID из окружения (рекомендуется)
+TOKEN = os.getenv("API_TOKEN") or "<ВАШ_ТОКЕН_ЗДЕСЬ>"
+ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))  # 0 означает, что пересылки админу не будет
+
+if not TOKEN or TOKEN.startswith("<ВАШ_ТОКЕН"):
+    raise RuntimeError("Установите API_TOKEN в переменных окружения или замените в коде.")
 
 bot = telebot.TeleBot(TOKEN)
 
-# Разметка клавиатуры
+# Клавиатура
 markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
 markup.add(telebot.types.KeyboardButton("Питання"))
-markup.add(telebot. types.KeyboardButton("Отримати реквізити"))
+markup.add(telebot.types.KeyboardButton("Отримати реквізити"))
 
 REKV_TEXT = (
     "<b>Реквізити для переказу</b>\n"
@@ -18,37 +23,45 @@ REKV_TEXT = (
     "IBAN: UA12 1234 5678 0000 1111 1234 5678"
 )
 
-# Команда /start
+# /start
 @bot.message_handler(commands=['start'])
-def send_welcome(message):
-    bot.reply_to(message, "Ласкаво просимо! Оберіть дію з меню.", reply_markup=markup)
+def handle_start(message):
+    bot.send_message(message.chat.id, "Ласкаво просимо! Оберіть дію з меню.", reply_markup=markup)
 
 # Кнопка "Питання"
-@bot.message_handler(func=lambda message: message.text == "Питання")
+@bot.message_handler(func=lambda m: m.text == "Питання")
 def ask_question(message):
-    msg = bot.send_message(message.chat.id, "Задайте своє питання:", reply_markup=markup)
-    bot.register_next_step_handler(msg, process_question)
+    sent = bot.send_message(message.chat.id, "Задайте своє питання:", reply_markup=markup)
+    bot.register_next_step_handler(sent, process_question)
 
 def process_question(message):
-    question_text = message.text
+    question_text = message.text or ""
     bot.send_message(message.chat.id, "Дякуємо! Ваше питання отримано.", reply_markup=markup)
-    
-    # Відправляємо адміну
-    user_name = f"{message.from_user.first_name} {message.from_user.last_name}".strip() or "Користувач"
-    admin_msg = f"<b>Нове питання!</b>\nВід: {user_name}\nID: {message.from_user.id}\nТекст: {question_text}"
-    bot. send_message(ADMIN_ID, admin_msg, parse_mode="HTML")
+
+    # Подготовка и отправка админу (если указан ADMIN_ID)
+    user_name = " ".join(filter(None, [message.from_user.first_name, message.from_user.last_name])) or "Користувач"
+    safe_name = telebot.util.escape_html(user_name)
+    safe_text = telebot.util.escape_html(question_text)
+    admin_msg = f"<b>Нове питання!</b>\nВід: {safe_name}\nID: {message.from_user.id}\nТекст: <pre>{safe_text}</pre>"
+
+    if ADMIN_ID:
+        try:
+            bot.send_message(ADMIN_ID, admin_msg, parse_mode="HTML")
+        except Exception as e:
+            # не фатал — логируем
+            print("Не удалось отправить админу:", e)
 
 # Кнопка "Отримати реквізити"
-@bot.message_handler(func=lambda message: message. text == "Отримати реквізити")
+@bot.message_handler(func=lambda m: m.text == "Отримати реквізити")
 def send_rekv(message):
-    bot.send_message(message. chat.id, REKV_TEXT, parse_mode="HTML", reply_markup=markup)
+    bot.send_message(message.chat.id, REKV_TEXT, parse_mode="HTML", reply_markup=markup)
 
-# Всі інші повідомлення
-@bot.message_handler(func=lambda message: True)
-def echo_all(message):
+# Все остальные сообщения
+@bot.message_handler(func=lambda m: True)
+def fallback(message):
     bot.send_message(message.chat.id, "Оберіть дію з меню ⬇", reply_markup=markup)
 
-# Запуск бота
 if __name__ == "__main__":
-    print("Бот запущен...")
-    bot.infinity_polling()
+    print("Бот запущен. Ожидаю сообщений...")
+    # Рекомендуется использовать infinity_polling для долгого запуска
+    bot.infinity_polling(timeout=60, long_polling_timeout=60)
