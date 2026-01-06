@@ -8,6 +8,8 @@ from html import escape
 
 # ====== Мини-конфигурация ======
 TOKEN = os.getenv("API_TOKEN")
+if not TOKEN:
+    raise RuntimeError("API_TOKEN environment variable not set!")
 try:
     ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 except Exception:
@@ -77,6 +79,8 @@ MAIN_MARKUP = {
 
 REKV_TEXT = "<b>Реквізити для переказу</b>\nПриватБанк: 1234 5678 0000 1111\nМоноБанк: 4444 5678 1234 5678\nIBAN: UA12 1234 5678 0000 1111 1234 5678\n"
 
+waiting_ids = set()
+
 @app.route(f"/webhook/{TOKEN}", methods=['POST'])
 def webhook():
     try:
@@ -91,15 +95,12 @@ def webhook():
                 send_message(chat_id, "Ласкаво просимо! Оберіть дію з меню.", reply_markup=MAIN_MARKUP)
             elif text == "Питання":
                 send_message(chat_id, "Задайте своє питання текстом. Ми передамо його адміністратору.", reply_markup=MAIN_MARKUP)
-                # ждём любой след. текст — минимальный state через set()
                 waiting_ids.add(chat_id)
             elif text == "Отримати реквізити":
                 send_message(chat_id, REKV_TEXT, parse_mode="HTML", reply_markup=MAIN_MARKUP)
             elif chat_id in waiting_ids:
-                # Пишем событие в базу (как у вас: category='Питання')
                 save_event("Питання")
                 send_message(chat_id, "Дякуємо! Ваше питання отримано.", reply_markup=MAIN_MARKUP)
-                # Отправляем админу
                 user_name = (user.get('first_name') or '') + ' ' + (user.get('last_name') or '')
                 admin_msg = "<b>Нове питання!</b>\n" \
                             f"Від: {escape(user_name.strip()) or 'Користувач'}\n" \
@@ -121,6 +122,7 @@ def index():
 
 def send_message(chat_id, text, reply_markup=None, parse_mode=None):
     if not TOKEN:
+        print("API_TOKEN not set; cannot send message.")
         return None
     url = f'https://api.telegram.org/bot{TOKEN}/sendMessage'
     payload = {
@@ -132,10 +134,11 @@ def send_message(chat_id, text, reply_markup=None, parse_mode=None):
     try:
         import requests
         return requests.post(url, data=payload, timeout=8)
-    except: return None
-
-waiting_ids = set()
+    except Exception as e:
+        print("Error sending message:", e)
+        return None
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
-    app.run("0.0.0.0", port=port)
+    print(f"Starting bot on port {port}...")
+    app.run("0.0.0.0", port=port, debug=True)
