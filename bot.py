@@ -1,67 +1,143 @@
 import os
-import telebot
-import telebot.util
+import json
+import time
+import traceback
+from html import escape
+from flask import Flask, request
+import requests
 
-# Получаем токен и ADMIN_ID из окружения (рекомендуется)
-TOKEN = os.getenv("API_TOKEN") or "<ВАШ_ТОКЕН_ЗДЕСЬ>"
-ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))  # 0 означает, что пересылки админу не будет
+# Простое логирование в файл
+def MainProtokol(s, ts='Log'):
+    try:
+        with open('log.txt', 'a', encoding='utf-8') as f:
+            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')};{ts};{s}\n")
+    except Exception:
+        pass
 
-if not TOKEN or TOKEN.startswith("<ВАШ_ТОКЕН"):
-    raise RuntimeError("Установите API_TOKEN в переменных окружения или замените в коде.")
+def cool_error_handler(exc, context=""):
+    tb = ''.join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    MainProtokol(f"{context} | {repr(exc)}\n{tb}", ts='ERROR')
+    print(f"[ERROR] {context}: {exc}")
+    # не шлём телеграм-нотификации в этой упрощённой версии
 
-bot = telebot.TeleBot(TOKEN)
+# Конфигурация (через окружение)
+TOKEN = os.getenv("API_TOKEN")
+if not TOKEN:
+    raise RuntimeError("API_TOKEN environment variable is not set")
 
-# Клавиатура
-markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-markup.add(telebot.types.KeyboardButton("Питання"))
-markup.add(telebot.types.KeyboardButton("Отримати реквізити"))
+try:
+    ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
+except Exception:
+    ADMIN_ID = 0
+
+# Клавиатура — reply-кнопки
+MAIN_MARKUP = {
+    "keyboard": [
+        [{"text": "Питання"}],
+        [{"text": "Отримати реквізити"}]
+    ],
+    "resize_keyboard": True,
+    "one_time_keyboard": False
+}
 
 REKV_TEXT = (
     "<b>Реквізити для переказу</b>\n"
     "ПриватБанк: 1234 5678 0000 1111\n"
     "МоноБанк: 4444 5678 1234 5678\n"
-    "IBAN: UA12 1234 5678 0000 1111 1234 5678"
+    "IBAN: UA12 1234 5678 0000 1111 1234 5678\n"
 )
 
-# /start
-@bot.message_handler(commands=['start'])
-def handle_start(message):
-    bot.send_message(message.chat.id, "Ласкаво просимо! Оберіть дію з меню.", reply_markup=markup)
+# State: чаты, которые находятся в режиме "чекаємо питання"
+waiting_ids = set()
 
-# Кнопка "Питання"
-@bot.message_handler(func=lambda m: m.text == "Питання")
-def ask_question(message):
-    sent = bot.send_message(message.chat.id, "Задайте своє питання:", reply_markup=markup)
-    bot.register_next_step_handler(sent, process_question)
+app = Flask(__name__)
 
-def process_question(message):
-    question_text = message.text or ""
-    bot.send_message(message.chat.id, "Дякуємо! Ваше питання отримано.", reply_markup=markup)
+def send_message(chat_id, text, reply_markup=None, parse_mode=None, timeout=8):
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    data = {"chat_id": chat_id, "text": text}
+    if reply_markup:
+        data["reply_markup"] = json.dumps(reply_markup, ensure_ascii=False)
+    if parse_mode:
+        data["parse_mode"] = parse_mode
+    try:
+        r = requests.post(url, data=data, timeout=timeout)
+        if not r.ok:
+            MainProtokol(f"send_message failed {r.status_code}: {r.text}", ts='WARN')
+        return r
+    except Exception as e:
+        cool_error_handler(e, "send_message")
+        return None
 
-    # Подготовка и отправка админу (если указан ADMIN_ID)
-    user_name = " ".join(filter(None, [message.from_user.first_name, message.from_user.last_name])) or "Користувач"
-    safe_name = telebot.util.escape_html(user_name)
-    safe_text = telebot.util.escape_html(question_text)
-    admin_msg = f"<b>Нове питання!</b>\nВід: {safe_name}\nID: {message.from_user.id}\nТекст: <pre>{safe_text}</pre>"
+def build_welcome_message(user: dict) -> str:
+    first = (user.get('first_name') or "").strip()
+    last = (user.get('last_name') or "").strip()
+    display = (first + (" " + last if last else "")).strip() or "Друже"
+    return (
+        "<b>Ласкаво просимо, " + escape(display) + "!</b>\n\n"
+        "Оберіть дію за допомогою кнопок внизу."
+    )
 
-    if ADMIN_ID:
-        try:
-            bot.send_message(ADMIN_ID, admin_msg, parse_mode="HTML")
-        except Exception as e:
-            # не фатал — логируем
-            print("Не удалось отправить админу:", e)
+@app.route(f"/webhook/{TOKEN}", methods=["POST"])
+def webhook():
+    try:
+        data_raw = request.get_data(as_text=True)
+        MainProtokol(f"UPDATE: {data_raw}", ts='UPDATE')
+        update = json.loads(data_raw)
 
-# Кнопка "Отримати реквізити"
-@bot.message_handler(func=lambda m: m.text == "Отримати реквізити")
-def send_rekv(message):
-    bot.send_message(message.chat.id, REKV_TEXT, parse_mode="HTML", reply_markup=markup)
+        # only handle message updates in this simplified version
+        if "message" in update:
+            msg = update["message"]
+            chat = msg.get("chat", {}) or {}
+            frm = msg.get("from", {}) or {}
+            chat_id = chat.get("id")
+            from_id = frm.get("id")
+            text = msg.get("text", "") or ""
 
-# Все остальные сообщения
-@bot.message_handler(func=lambda m: True)
-def fallback(message):
-    bot.send_message(message.chat.id, "Оберіть дію з меню ⬇", reply_markup=markup)
+            # /start or start via text
+            if text.strip() == "/start":
+                welcome = build_welcome_message(frm)
+                send_message(chat_id, welcome, reply_markup=MAIN_MARKUP, parse_mode="HTML")
+                return "ok", 200
+
+            # user pressed "Питання"
+            if text.strip() == "Питання":
+                waiting_ids.add(chat_id)
+                send_message(chat_id, "Напишіть, будь ласка, своє питання текстом. Ми передамо його адміністратору.", reply_markup=MAIN_MARKUP)
+                return "ok", 200
+
+            # user pressed "Отримати реквізити"
+            if text.strip() == "Отримати реквізити":
+                send_message(chat_id, REKV_TEXT, reply_markup=MAIN_MARKUP, parse_mode="HTML")
+                return "ok", 200
+
+            # if chat is waiting for question — forward to admin and confirm
+            if chat_id in waiting_ids:
+                user_name = (frm.get('first_name') or '') + ' ' + (frm.get('last_name') or '')
+                user_name = user_name.strip() or 'Користувач'
+                admin_text = (
+                    "<b>Нове питання</b>\n"
+                    f"Від: {escape(user_name)}\n"
+                    f"ID: {escape(str(from_id))}\n\n"
+                    f"<b>Текст:</b>\n<pre>{escape(text)}</pre>"
+                )
+                if ADMIN_ID:
+                    send_message(ADMIN_ID, admin_text, parse_mode="HTML")
+                send_message(chat_id, "Дякуємо! Ваше питання отримано та передане адміністратору.", reply_markup=MAIN_MARKUP)
+                waiting_ids.discard(chat_id)
+                return "ok", 200
+
+            # default fallback
+            send_message(chat_id, "Оберіть дію з меню ⬇", reply_markup=MAIN_MARKUP)
+        return "ok", 200
+    except Exception as e:
+        cool_error_handler(e, "webhook")
+        return "ok", 200
+
+@app.route("/", methods=["GET"])
+def index():
+    return "Bot is running", 200
 
 if __name__ == "__main__":
-    print("Бот запущен. Ожидаю сообщений...")
-    # Рекомендуется использовать infinity_polling для долгого запуска
-    bot.infinity_polling(timeout=60, long_polling_timeout=60)
+    port = int(os.getenv("PORT", "5000"))
+    print(f"Starting app on port {port} ...")
+    app.run(host="0.0.0.0", port=port)
