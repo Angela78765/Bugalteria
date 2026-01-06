@@ -79,7 +79,7 @@ def support_groups_inline():
             [{"text": "Группа ФОП 1", "callback_data": "support_1"}],
             [{"text": "Группа ФОП 2", "callback_data": "support_2"}],
             [{"text": "Группа ФОП 3", "callback_data": "support_3"}],
-            [{"text": "Повернутися в меню", "callback_data": "support_back"}]
+            [{"text": "Пове��нутися в меню", "callback_data": "support_back"}]
         ]
     }
 
@@ -196,11 +196,14 @@ def webhook():
             return "ok", 200
 
         if data == "support_admin":
-            send_message(chat_id, "Ожидайте ответа администратора...", reply_markup=user_finish_markup())
+            # Поведение полностью как у reply-кнопки "Связь с админом"
             if chat_id not in active_chats:
                 active_chats[chat_id] = "pending"
-                notif = f"<b>Новое сообщение по супроводу ФОП!</b>\nВід: {escape(chat_id)}\nID: <pre>{chat_id}</pre>"
+                send_message(chat_id, "Ожидайте ответа администратора...", reply_markup=user_finish_markup())
+                notif = f"<b>Новое сообщение по супроводу ФОП!</b>\nID: <pre>{chat_id}</pre>"
                 send_message(ADMIN_ID, notif, parse_mode="HTML", reply_markup=admin_reply_markup(chat_id))
+            else:
+                send_message(chat_id, "Ожидайте ответа администратора...", reply_markup=user_finish_markup())
             return "ok", 200
 
         if data == "support_back":
@@ -238,7 +241,7 @@ def webhook():
         if data.startswith("close_") and int(from_id) == ADMIN_ID:
             user_id = int(data.split("_")[1])
             active_chats.pop(user_id, None)
-            send_message(user_id, "⛔️ Чат завершён администратором. Вы вернулись в главное меню.", reply_markup=main_menu_markup())
+            send_message(user_id, "⛔️ Чат завершён администратором. Вы вернулись в гл��вное меню.", reply_markup=main_menu_markup())
             send_message(ADMIN_ID, "Чат завершён.", reply_markup=main_menu_markup())
             return "ok", 200
 
@@ -293,7 +296,7 @@ def webhook():
             send_message(ADMIN_ID, f"Пользователь {cid}:\n<pre>{escape(text)}</pre>", parse_mode="HTML", reply_markup=admin_reply_markup(cid))
         return "ok", 200
 
-    # --- Ответ админа пользователю (е��ли есть активный чат) ---
+    # --- Ответ админа пользователю (если есть активный чат) ---
     if cid == ADMIN_ID:
         targets = [u for u, s in active_chats.items() if s == "active"]
         if not targets:
@@ -312,7 +315,7 @@ def webhook():
 
     # --- Если пользователь в чате, доступны только переписка и "Завершить чат" ---
     if cid in active_chats:
-        send_message(cid, "В активном чате доступны только переписка и кнопка 'З��вершить чат'.", reply_markup=user_finish_markup())
+        send_message(cid, "В активном чате доступны только переписка и кнопка 'Завершить чат'.", reply_markup=user_finish_markup())
         return "ok", 200
 
     # === ОБРАБОТКА КОНТАКТОВ КОНСУЛЬТАЦІЇ ===
