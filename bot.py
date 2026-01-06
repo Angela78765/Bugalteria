@@ -70,6 +70,83 @@ WELCOME_SERVICES_TEXT = (
     "З чого хочете розпочати ? 👇"
 )
 
+
+# ... (существующий код)
+
+# ======= Inline markup для консультації =======
+def consult_duration_inline():
+    return {
+        "inline_keyboard": [
+            [{"text": "30 хв", "callback_data": "consult_30"}],
+            [{"text": "45 хв", "callback_data": "consult_45"}],
+            [{"text": "60 хв", "callback_data": "consult_60"}],
+            [{"text": "Повернутися в меню", "callback_data": "consult_back"}]
+        ]
+    }
+
+CONSULT_INTRO_TEXT = (
+    "Консультація — це зручно, швидко і по суті 💬\n"
+    "Ви можете обрати формат:\n\n"
+    "▫️ 30 хв — 600 грн\n"
+    "▫️ 45 хв — 800 грн\n"
+    "▫️ 60 хв — 1000 грн\n\n"
+    "Консультація проходить онлайн (Telegram / Instagram).\n\n"
+    "Оберіть, будь ласка, тривалість 👇"
+)
+
+CONSULT_CONTACTS_TEXT = (
+    "Чудово! 💼\n"
+    "Щоб зафіксувати час консультації, будь ласка, залиште ваші контакти:\n"
+    "•Ім'я та Прізвище\n"
+    "•Нік Інстаграм чи Телеграм"
+)
+
+# ======= добавить управление этапом консультації =======
+consult_request = {}  # user_id -> {"stage": "choose_duration"/"await_contact", "duration": "30"|"45"|"60"}
+
+# ... (код flask route webhook)
+
+    # --- Обработка сервисных инлайн-кнопок ---
+    if data in ("consult", "support", "regclose", "reports", "prro", "decret"):
+        if data == "consult":
+            consult_request[from_id] = {"stage": "choose_duration"}
+            send_message(chat_id, CONSULT_INTRO_TEXT, reply_markup=consult_duration_inline())
+        else:
+            send_message(chat_id, "Оберіть далі, або поверніться до меню.", reply_markup=return_to_menu_markup())
+        return "ok", 200
+
+    # --- Обработка выбора длительности консультации ---
+    if data in ("consult_30", "consult_45", "consult_60"):
+        duration = data.split("_")[1]
+        consult_request[from_id] = {"stage": "await_contact", "duration": duration}
+        send_message(chat_id, CONSULT_CONTACTS_TEXT, reply_markup=return_to_menu_markup())
+        return "ok", 200
+
+    if data == "consult_back":
+        send_message(chat_id, WELCOME_SERVICES_TEXT, reply_markup=welcome_services_inline(), parse_mode="HTML")
+        consult_request.pop(from_id, None)
+        return "ok", 200
+
+# ... (после основного блока с обработкой text сообщений, ДО Fallback)
+
+    # --- Обработка отправки контактов после выбора консультации ---
+    if user_id in consult_request and consult_request[user_id].get("stage") == "await_contact":
+        duration = consult_request[user_id].get("duration")
+        user_contacts = text.strip()
+        note = (
+            f"<b>Заявка на консультацію</b>\n"
+            f"Тривалість: {duration} хв\n"
+            f"Від: {escape(user_name)}\n"
+            f"ID: <pre>{user_id}</pre>\n"
+            f"Контакти: <pre>{escape(user_contacts)}</pre>"
+        )
+        send_message(ADMIN_ID, note, parse_mode="HTML", reply_markup=admin_reply_markup(user_id))
+        send_message(user_id, "Дякую! Ваші дані отримано, з вами зв'яжеться адміністратор.", reply_markup=main_menu_markup())
+        consult_request.pop(user_id, None)
+        return "ok", 200
+
+# ... (остаток кода без изменений)
+
 # ======= Хелперы для отправки сообщений и медиа =======
 def send_message(chat_id, text, reply_markup=None, parse_mode=None):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
