@@ -1,15 +1,15 @@
 import os
 import json
 import datetime
-import threading
 from flask import Flask, request
 from sqlalchemy import create_engine, text
 from html import escape
 
-# ====== Мини-конфигурация ======
+# Проверка переменных среды
 TOKEN = os.getenv("API_TOKEN")
 if not TOKEN:
-    raise RuntimeError("API_TOKEN environment variable not set!")
+    raise RuntimeError("Переменная API_TOKEN не установлена!")
+
 try:
     ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 except Exception:
@@ -22,7 +22,9 @@ if not DATABASE_URL:
 else:
     db_url = DATABASE_URL
 
-# ========== БАЗА ==========
+waiting_ids = set()
+
+# ========== База данных ==========
 _engine = None
 def get_engine():
     global _engine
@@ -35,19 +37,23 @@ def get_engine():
 
 def init_db():
     engine = get_engine()
-    create_sql = """
-    CREATE TABLE IF NOT EXISTS events (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        category TEXT NOT NULL,
-        dt TEXT NOT NULL
-    );
-    """ if engine.dialect.name == "sqlite" else """
-    CREATE TABLE IF NOT EXISTS events (
-        id SERIAL PRIMARY KEY,
-        category TEXT NOT NULL,
-        dt TIMESTAMP NOT NULL
-    );
-    """
+    create_sql = (
+        """
+        CREATE TABLE IF NOT EXISTS events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            category TEXT NOT NULL,
+            dt TEXT NOT NULL
+        );
+        """
+        if engine.dialect.name == "sqlite"
+        else """
+        CREATE TABLE IF NOT EXISTS events (
+            id SERIAL PRIMARY KEY,
+            category TEXT NOT NULL,
+            dt TIMESTAMP NOT NULL
+        );
+        """
+    )
     with engine.begin() as conn:
         conn.execute(text(create_sql))
 
@@ -71,34 +77,37 @@ app = Flask(__name__)
 
 MAIN_MARKUP = {
     "keyboard": [
-        [{"text":"Питання"}],
-        [{"text":"Отримати реквізити"}]
+        [{"text": "Питання"}],
+        [{"text": "Отримати реквізити"}]
     ],
     "resize_keyboard": True,
 }
 
 REKV_TEXT = "<b>Реквізити для переказу</b>\nПриватБанк: 1234 5678 0000 1111\nМоноБанк: 4444 5678 1234 5678\nIBAN: UA12 1234 5678 0000 1111 1234 5678\n"
 
-waiting_ids = set()
-
 @app.route(f"/webhook/{TOKEN}", methods=['POST'])
 def webhook():
     try:
         data = request.get_data(as_text=True)
+        print(f"Получен запрос: {data}")  # Диагностика!
         update = json.loads(data)
         if "message" in update:
             message = update["message"]
             chat_id = message["chat"]["id"]
             text = message.get("text", "")
             user = message.get("from", {})
+            print(f"От чата {chat_id}: {text}")
             if text == "/start":
                 send_message(chat_id, "Ласкаво просимо! Оберіть дію з меню.", reply_markup=MAIN_MARKUP)
+                return "ok", 200
             elif text == "Питання":
                 send_message(chat_id, "Задайте своє питання текстом. Ми передамо його адміністратору.", reply_markup=MAIN_MARKUP)
                 waiting_ids.add(chat_id)
+                return "ok", 200
             elif text == "Отримати реквізити":
                 send_message(chat_id, REKV_TEXT, parse_mode="HTML", reply_markup=MAIN_MARKUP)
-            elif chat_id in waiting_ids:
+                return "ok", 200
+            elif chat_id in waiting_ids and text:
                 save_event("Питання")
                 send_message(chat_id, "Дякуємо! Ваше питання отримано.", reply_markup=MAIN_MARKUP)
                 user_name = (user.get('first_name') or '') + ' ' + (user.get('last_name') or '')
@@ -109,11 +118,15 @@ def webhook():
                 if ADMIN_ID:
                     send_message(ADMIN_ID, admin_msg, parse_mode="HTML")
                 waiting_ids.discard(chat_id)
+                return "ok", 200
             else:
                 send_message(chat_id, "Оберіть дію з меню ⬇", reply_markup=MAIN_MARKUP)
+                return "ok", 200
+        else:
+            print("Нет сообщения в update:", update)
         return "ok", 200
     except Exception as e:
-        print("Error:", e)
+        print("Ошибка в webhook:", repr(e))
         return "ok", 200
 
 @app.route('/', methods=['GET'])
@@ -129,16 +142,21 @@ def send_message(chat_id, text, reply_markup=None, parse_mode=None):
         'chat_id': chat_id,
         'text': text,
     }
-    if reply_markup: payload['reply_markup'] = json.dumps(reply_markup)
-    if parse_mode: payload['parse_mode'] = parse_mode
+    if reply_markup:
+        payload['reply_markup'] = json.dumps(reply_markup)
+    if parse_mode:
+        payload['parse_mode'] = parse_mode
     try:
         import requests
-        return requests.post(url, data=payload, timeout=8)
+        r = requests.post(url, data=payload, timeout=8)
+        print(f"send_message response {r.status_code}: {r.text}")
+        return r
     except Exception as e:
-        print("Error sending message:", e)
+        print("Ошибка отправки сообщения:", e)
         return None
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
-    print(f"Starting bot on port {port}...")
+    print(f"Bot starting on port {port} ...")
     app.run("0.0.0.0", port=port, debug=True)
+    
