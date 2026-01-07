@@ -748,7 +748,7 @@ def webhook():
     # --- Запит на поставити питання (адмін) ---
     if text == "Поставити питання" and cid not in active_chats:
         active_chats[cid] = "pending"
-        send_message(cid, "Очікуйте відповіді адміні��тратора..  .", reply_markup=user_finish_markup())
+        send_message(cid, "Очікуйте відповіді адміністратора..  .", reply_markup=user_finish_markup())
         notif = f"<b>Нове повідомлення від користувача!  </b>\nВід: {escape(user_name)}\nID: <pre>{cid}</pre>"
         send_message(ADMIN_ID, notif, parse_mode="HTML", reply_markup=admin_reply_markup(cid))
         if any(k in msg for k in ("photo", "document", "video", "audio", "voice")):
