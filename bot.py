@@ -4,6 +4,9 @@ from flask import Flask, request
 import requests
 from html import escape
 
+
+
+
 # ======= Конфигурация =======
 TOKEN = os.getenv("API_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
