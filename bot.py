@@ -699,7 +699,7 @@ def webhook():
         return "ok", 200
 
     if text == "Реквізити для оплати" and cid not in active_chats:
-        send_message(cid, "<b>Реквізити для оплати:</b>\nПриватБанк:  1234 5678 0000 1111\nМоноБанк: 4444 5678 1234 5678\nIBAN: UA12 1234 5678 0000 1111 1234 5678", reply_markup=return_to_menu_markup(), parse_mode="HTML")
+        send_message(cid, "<b>Реквізити для оплати:</b>\nОтримувач:\nФОП Романюк Анжела Василівна\nUA033220010000026006340057875\nЄДРПОУ 3316913762\nПризначення платежу: \nОплата за консультаційні інформаційні послуги", reply_markup=return_to_menu_markup(), parse_mode="HTML")
         return "ok", 200
 
     # --- Запит на поставити питання (адмін) ---
