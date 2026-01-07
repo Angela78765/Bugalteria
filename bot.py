@@ -55,7 +55,7 @@ def welcome_services_inline():
             [{"text":   "• супровід ФОП", "callback_data":   "support"}],
             [{"text":   "• реєстрація / закриття", "callback_data":  "regclose"}],
             [{"text":  "• звітність і податки", "callback_data": "reports"}],
-            [{"text":   "реєстрація/закриття ПРРО", "callback_data":   "prro"}],
+            [{"text":   "• реєстрація/закриття ПРРО", "callback_data":   "prro"}],
             [{"text":  "• декрет ФОП", "callback_data": "decret"}]
         ]
     }
