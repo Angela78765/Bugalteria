@@ -1,4 +1,4 @@
-мimport os
+import os
 import json
 from flask import Flask, request
 import requests
